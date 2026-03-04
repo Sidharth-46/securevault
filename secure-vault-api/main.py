@@ -66,10 +66,12 @@ def _on_startup() -> None:
 
 
 @app.get("/")
-def root():
+@app.head("/")
+async def root():
     return {"status": "Secure Vault API running"}
 
 
 @app.get("/health")
-def health_check():
+@app.head("/health")
+async def health_check():
     return {"status": "ok", "service": "secure-vault-api"}

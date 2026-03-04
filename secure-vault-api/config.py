@@ -26,8 +26,8 @@ JWT_EXPIRY_HOURS: int = int(os.getenv("JWT_EXPIRY_HOURS", "24"))
 
 SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
-EMAIL_USER: str = os.getenv("EMAIL_USER", "EMAIL_USER")
-EMAIL_PASS: str = os.getenv("EMAIL_PASS", "EMAIL_PASS")
+EMAIL_USER: str = os.getenv("EMAIL_USER", "")
+EMAIL_PASS: str = os.getenv("EMAIL_PASS", "")
 EMAIL_FROM: str = os.getenv("EMAIL_FROM", "") or EMAIL_USER
 
 # ── Password reset ──────────────────────────────────────────────────────────
