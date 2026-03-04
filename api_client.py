@@ -9,13 +9,16 @@ never deals with raw HTTP.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import requests
 
 from config import API_BASE_URL
 
-_TIMEOUT = 60  # seconds – generous to allow Render cold-start wake-up
+logger = logging.getLogger("securevault.api_client")
+
+_TIMEOUT = 90  # seconds – generous to allow Render cold-start wake-up
 
 
 # ── Generic helper ───────────────────────────────────────────────────────────
@@ -26,20 +29,25 @@ def _post(endpoint: str, payload: dict) -> dict[str, Any]:
     On network / HTTP errors, returns ``{"success": False, "message": "..."}``
     so callers never have to handle exceptions.
     """
+    url = f"{API_BASE_URL}{endpoint}"
+    logger.info("POST %s", url)
     try:
         resp = requests.post(
-            f"{API_BASE_URL}{endpoint}",
+            url,
             json=payload,
             timeout=_TIMEOUT,
         )
+        logger.info("POST %s → %s", url, resp.status_code)
         resp.raise_for_status()
         return resp.json()
     except requests.ConnectionError:
+        logger.warning("POST %s → ConnectionError", url)
         return {
             "success": False,
-            "message": "Cannot reach the authentication server. Is the backend running?",
+            "message": "Cannot connect to the authentication server. Check your internet connection.",
         }
     except requests.Timeout:
+        logger.warning("POST %s → Timeout after %ss", url, _TIMEOUT)
         return {
             "success": False,
             "message": (
