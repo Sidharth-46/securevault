@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: secure-vault-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    envVars:
+      - key: VAULT_JWT_SECRET
+        generateValue: true
+      - key: VAULT_SMTP_USER
+        sync: false
+      - key: VAULT_SMTP_PASS
+        sync: false
+      - key: VAULT_SMTP_FROM
+        sync: false
+      - key: VAULT_WEB_RESET_URL
+        value: https://securevaultsid.vercel.app
+      - key: FIREBASE_SERVICE_ACCOUNT_PATH
+        value: firebase_service_account.json

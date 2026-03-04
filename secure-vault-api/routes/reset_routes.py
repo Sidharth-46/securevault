@@ -4,6 +4,7 @@ routes/reset_routes.py - Password reset, OTP, and master-PIN endpoints.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -22,6 +23,7 @@ from config import (
     RESEND_MAX_ATTEMPTS,
 )
 
+logger = logging.getLogger("securevault.reset")
 router = APIRouter()
 
 
@@ -100,8 +102,10 @@ def forgot_password(body: ForgotPasswordRequest):
     reset_link = f"{WEB_RESET_BASE_URL}/reset-password?token={token}"
     ok, err = send_reset_email(email, reset_link, RESET_TOKEN_EXPIRY_MINUTES)
     if not ok:
+        logger.error("Failed to send reset email to %s: %s", email, err)
         return GenericResponse(success=False, message=f"Failed to send email: {err}")
 
+    logger.info("Password reset requested: %s", email)
     return GenericResponse(success=True, message="Reset email sent. Check your inbox.")
 
 
@@ -153,6 +157,7 @@ def reset_password(body: ResetPasswordRequest):
     db.collection("users").document(uid).update({"password_hash": pw_hash})
     db.collection("password_resets").document(reset_doc.id).update({"used": True})
 
+    logger.info("Password reset completed: %s", email)
     return GenericResponse(success=True, message="Password reset successful. Please sign in.")
 
 
@@ -183,8 +188,10 @@ def request_otp(body: ForgotPasswordRequest):
 
     ok, err = send_otp_email(email, otp, OTP_EXPIRY_MINUTES)
     if not ok:
+        logger.error("Failed to send OTP to %s: %s", email, err)
         return GenericResponse(success=False, message=f"Failed to send OTP email: {err}")
 
+    logger.info("OTP requested: %s", email)
     return GenericResponse(success=True, message="OTP sent to your email.")
 
 
@@ -304,6 +311,7 @@ def verify_otp(body: VerifyOtpRequest):
 
     # OTP verified - clean up
     db.collection("otp_verifications").document(otp_doc.id).delete()
+    logger.info("OTP verified: %s", email)
     return GenericResponse(success=True, message="OTP verified successfully.")
 
 
@@ -322,4 +330,5 @@ def reset_master_pin(body: ResetPinRequest):
     pin_hash = _hash(body.new_pin)
     db.collection("users").document(uid).update({"master_pin_hash": pin_hash})
 
+    logger.info("Master PIN reset completed: %s", email)
     return GenericResponse(success=True, message="Master PIN reset successful.")

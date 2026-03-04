@@ -4,6 +4,7 @@ routes/auth_routes.py - Registration, login, and Google OAuth endpoints.
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 
@@ -16,6 +17,7 @@ from firestore_client import db
 from services.token_service import create_jwt
 from config import GOOGLE_USERINFO_URL
 
+logger = logging.getLogger("securevault.auth")
 router = APIRouter()
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
@@ -99,6 +101,7 @@ def register(body: RegisterRequest):
     )
 
     token = create_jwt(doc_ref.id, email)
+    logger.info("Account registered: %s", email)
     return AuthResponse(
         success=True,
         message="Account created successfully.",
@@ -122,9 +125,11 @@ def login(body: LoginRequest):
         )
 
     if not _verify_password(body.password, user["password_hash"]):
+        logger.warning("Failed login attempt: %s", email)
         return AuthResponse(success=False, message="Incorrect password.")
 
     token = create_jwt(uid, email)
+    logger.info("Login successful: %s", email)
     return AuthResponse(
         success=True, message="Login successful.", token=token, email=email
     )
@@ -174,6 +179,7 @@ def google_login(body: GoogleLoginRequest):
             db.collection("users").document(uid).update({"google_id": google_id})
 
     token = create_jwt(uid, email)
+    logger.info("Google login successful: %s", email)
     return AuthResponse(
         success=True, message="Google login successful.", token=token, email=email
     )
