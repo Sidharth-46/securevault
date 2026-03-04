@@ -224,6 +224,24 @@ class _GoogleWorker(QThread):
             self.error.emit(err)
 
 
+class _ApiWorker(QThread):
+    """Run an arbitrary callable off the UI thread and emit its return value."""
+
+    finished = pyqtSignal(object)   # result tuple from the wrapped function
+
+    def __init__(self, fn, *args) -> None:
+        super().__init__()
+        self._fn = fn
+        self._args = args
+
+    def run(self) -> None:
+        try:
+            result = self._fn(*self._args)
+        except Exception as exc:
+            result = (False, str(exc))
+        self.finished.emit(result)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  LoginWindow
 # ═════════════════════════════════════════════════════════════════════════════
@@ -254,6 +272,7 @@ class LoginWindow(QWidget):
         self._cooldown_remaining = 0
         self._active_resend_btn: QPushButton | None = None
         self._active_resend_label: QLabel | None = None
+        self._api_workers: list[_ApiWorker] = []   # prevent GC of in-flight workers
         self._init_ui()
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -701,6 +720,19 @@ class LoginWindow(QWidget):
     #  AUTH LOGIC (Page 0)
     # ─────────────────────────────────────────────────────────────────────────
 
+    # ── Background-API helper ─────────────────────────────────────────────
+
+    def _run_api(self, fn, args: tuple, callback) -> None:
+        """Run *fn(*args)* on a background thread; invoke *callback(result)* on the UI thread."""
+        worker = _ApiWorker(fn, *args)
+        self._api_workers.append(worker)
+        worker.finished.connect(callback)
+        worker.finished.connect(lambda: (
+            self._api_workers.remove(worker) if worker in self._api_workers else None
+        ))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
     def _toggle_mode(self) -> None:
         if self._mode == "signin":
             self._mode = "register"
@@ -729,15 +761,26 @@ class LoginWindow(QWidget):
             if password != confirm:
                 self._auth_error.setText("Passwords do not match.")
                 return
-            ok, msg = auth_service.register(email, password)
+            fn = auth_service.register
         else:
-            ok, msg = auth_service.login(email, password)
-        if not ok:
-            self._auth_error.setText(msg)
-            return
+            fn = auth_service.login
+
+        self._auth_btn.setEnabled(False)
+        self._auth_btn.setText("Please wait\u2026")
         self._auth_error.setText("")
-        self._pending_password = password
-        self._try_auto_vault(password)
+
+        def _on_result(result):
+            self._auth_btn.setEnabled(True)
+            self._auth_btn.setText("Register" if self._mode == "register" else "Sign In")
+            ok, msg = result
+            if not ok:
+                self._auth_error.setText(msg)
+                return
+            self._auth_error.setText("")
+            self._pending_password = password
+            self._try_auto_vault(password)
+
+        self._run_api(fn, (email, password), _on_result)
 
     # ── Google OAuth ─────────────────────────────────────────────────────────
 
@@ -757,14 +800,20 @@ class LoginWindow(QWidget):
         self._google_worker.start()
 
     def _on_google_ok(self, access_token: str) -> None:
-        self._google_btn.setEnabled(True)
-        self._google_btn.setText("\U0001F310  Sign in with Google")
-        ok, msg = auth_service.complete_google_login(access_token)
-        if not ok:
-            self._auth_error.setText(msg)
-            return
-        self._pending_password = None
-        self._show_vault_page()
+        self._google_btn.setText("Verifying\u2026")
+        self._auth_error.setText("")
+
+        def _on_result(result):
+            self._google_btn.setEnabled(True)
+            self._google_btn.setText("\U0001F310  Sign in with Google")
+            ok, msg = result
+            if not ok:
+                self._auth_error.setText(msg)
+                return
+            self._pending_password = None
+            self._show_vault_page()
+
+        self._run_api(auth_service.complete_google_login, (access_token,), _on_result)
 
     def _on_google_err(self, err: str) -> None:
         self._google_btn.setEnabled(True)
@@ -844,20 +893,20 @@ class LoginWindow(QWidget):
         self._fp_send_btn.setEnabled(False)
         self._fp_send_btn.setText("Sending\u2026")
 
-        ok, msg = recovery_service.request_password_reset(email)
+        def _on_result(result):
+            self._fp_send_btn.setEnabled(True)
+            self._fp_send_btn.setText("Send Reset Email")
+            ok, msg = result
+            if not ok:
+                self._fp_error.setText(msg)
+                return
+            self._recovery_email = email
+            self._fp_success.setText(msg)
+            self._fp_resend_btn.setVisible(True)
+            self._fp_resend_label.setVisible(True)
+            self._start_cooldown(self._fp_resend_btn, self._fp_resend_label)
 
-        self._fp_send_btn.setEnabled(True)
-        self._fp_send_btn.setText("Send Reset Email")
-
-        if not ok:
-            self._fp_error.setText(msg)
-            return
-
-        self._recovery_email = email
-        self._fp_success.setText(msg)
-        self._fp_resend_btn.setVisible(True)
-        self._fp_resend_label.setVisible(True)
-        self._start_cooldown(self._fp_resend_btn, self._fp_resend_label)
+        self._run_api(recovery_service.request_password_reset, (email,), _on_result)
 
     def _on_resend_reset_email(self) -> None:
         email = self._fp_email.text().strip() or self._recovery_email
@@ -866,14 +915,18 @@ class LoginWindow(QWidget):
             return
         self._fp_error.setText("")
         self._fp_success.setText("")
+        self._fp_resend_btn.setEnabled(False)
 
-        ok, msg = recovery_service.resend_password_reset(email)
-        if not ok:
-            self._fp_error.setText(msg)
-            return
+        def _on_result(result):
+            self._fp_resend_btn.setEnabled(True)
+            ok, msg = result
+            if not ok:
+                self._fp_error.setText(msg)
+                return
+            self._fp_success.setText(msg)
+            self._start_cooldown(self._fp_resend_btn, self._fp_resend_label)
 
-        self._fp_success.setText(msg)
-        self._start_cooldown(self._fp_resend_btn, self._fp_resend_label)
+        self._run_api(recovery_service.resend_password_reset, (email,), _on_result)
 
     def _on_reset_pw_submit(self) -> None:
         token = self._rp_token.text().strip()
@@ -892,19 +945,24 @@ class LoginWindow(QWidget):
 
         self._rp_error.setText("")
         self._rp_success.setText("")
+        self._rp_btn.setEnabled(False)
+        self._rp_btn.setText("Resetting\u2026")
 
-        ok, msg = recovery_service.reset_password(token, new_pw)
-        if not ok:
-            self._rp_error.setText(msg)
-            return
+        def _on_result(result):
+            self._rp_btn.setEnabled(True)
+            self._rp_btn.setText("Reset Password")
+            ok, msg = result
+            if not ok:
+                self._rp_error.setText(msg)
+                return
+            self._rp_success.setText(msg)
+            self._rp_token.clear()
+            self._rp_new_pw.clear()
+            self._rp_confirm.clear()
+            # Invalidate session – user must re-login
+            auth_service.clear_session()
 
-        self._rp_success.setText(msg)
-        self._rp_token.clear()
-        self._rp_new_pw.clear()
-        self._rp_confirm.clear()
-
-        # Invalidate session – user must re-login
-        auth_service.clear_session()
+        self._run_api(recovery_service.reset_password, (token, new_pw), _on_result)
 
     # ─────────────────────────────────────────────────────────────────────────
     #  FORGOT MASTER PIN (Pages 4-6)
@@ -920,24 +978,23 @@ class LoginWindow(QWidget):
         self._fpin_send_btn.setEnabled(False)
         self._fpin_send_btn.setText("Sending\u2026")
 
-        ok, msg = recovery_service.request_master_pin_otp(email)
+        def _on_result(result):
+            self._fpin_send_btn.setEnabled(True)
+            self._fpin_send_btn.setText("Send OTP")
+            ok, msg = result
+            if not ok:
+                self._fpin_error.setText(msg)
+                return
+            self._recovery_email = email
+            self._fpin_success.setText(msg)
+            # Navigate to OTP page
+            self._otp_email_label.setText(f"Enter the code sent to {email}")
+            self._otp_input.clear()
+            self._otp_error.setText("")
+            self._otp_success.setText("")
+            self._pages.setCurrentIndex(self.PAGE_OTP_VERIFY)
 
-        self._fpin_send_btn.setEnabled(True)
-        self._fpin_send_btn.setText("Send OTP")
-
-        if not ok:
-            self._fpin_error.setText(msg)
-            return
-
-        self._recovery_email = email
-        self._fpin_success.setText(msg)
-
-        # Navigate to OTP page
-        self._otp_email_label.setText(f"Enter the code sent to {email}")
-        self._otp_input.clear()
-        self._otp_error.setText("")
-        self._otp_success.setText("")
-        self._pages.setCurrentIndex(self.PAGE_OTP_VERIFY)
+        self._run_api(recovery_service.request_master_pin_otp, (email,), _on_result)
 
     def _on_otp_verify(self) -> None:
         otp = self._otp_input.text().strip()
@@ -947,19 +1004,25 @@ class LoginWindow(QWidget):
 
         self._otp_error.setText("")
         self._otp_success.setText("")
+        self._otp_verify_btn.setEnabled(False)
+        self._otp_verify_btn.setText("Verifying\u2026")
 
-        ok, msg = recovery_service.verify_otp(self._recovery_email, otp)
-        if not ok:
-            self._otp_error.setText(msg)
-            return
+        def _on_result(result):
+            self._otp_verify_btn.setEnabled(True)
+            self._otp_verify_btn.setText("Verify")
+            ok, msg = result
+            if not ok:
+                self._otp_error.setText(msg)
+                return
+            self._otp_success.setText(msg)
+            # Navigate to PIN reset page
+            self._pr_new_pin.clear()
+            self._pr_confirm.clear()
+            self._pr_error.setText("")
+            self._pr_success.setText("")
+            self._pages.setCurrentIndex(self.PAGE_PIN_RESET)
 
-        self._otp_success.setText(msg)
-        # Navigate to PIN reset page
-        self._pr_new_pin.clear()
-        self._pr_confirm.clear()
-        self._pr_error.setText("")
-        self._pr_success.setText("")
-        self._pages.setCurrentIndex(self.PAGE_PIN_RESET)
+        self._run_api(recovery_service.verify_otp, (self._recovery_email, otp), _on_result)
 
     def _on_resend_otp(self) -> None:
         if not self._recovery_email:
@@ -967,15 +1030,19 @@ class LoginWindow(QWidget):
             return
         self._otp_error.setText("")
         self._otp_success.setText("")
+        self._otp_resend_btn.setEnabled(False)
 
-        ok, msg = recovery_service.resend_otp(self._recovery_email)
-        if not ok:
-            self._otp_error.setText(msg)
-            return
+        def _on_result(result):
+            self._otp_resend_btn.setEnabled(True)
+            ok, msg = result
+            if not ok:
+                self._otp_error.setText(msg)
+                return
+            self._otp_success.setText(msg)
+            self._otp_input.clear()
+            self._start_cooldown(self._otp_resend_btn, self._otp_resend_label)
 
-        self._otp_success.setText(msg)
-        self._otp_input.clear()
-        self._start_cooldown(self._otp_resend_btn, self._otp_resend_label)
+        self._run_api(recovery_service.resend_otp, (self._recovery_email,), _on_result)
 
     def _on_pin_reset_submit(self) -> None:
         new_pin = self._pr_new_pin.text().strip()
@@ -990,18 +1057,23 @@ class LoginWindow(QWidget):
 
         self._pr_error.setText("")
         self._pr_success.setText("")
+        self._pr_btn.setEnabled(False)
+        self._pr_btn.setText("Resetting\u2026")
 
-        ok, msg = recovery_service.reset_master_pin(self._recovery_email, new_pin)
-        if not ok:
-            self._pr_error.setText(msg)
-            return
+        def _on_result(result):
+            self._pr_btn.setEnabled(True)
+            self._pr_btn.setText("Reset Master PIN")
+            ok, msg = result
+            if not ok:
+                self._pr_error.setText(msg)
+                return
+            self._pr_success.setText(msg)
+            self._pr_new_pin.clear()
+            self._pr_confirm.clear()
+            # Invalidate session – user must re-login
+            auth_service.clear_session()
 
-        self._pr_success.setText(msg)
-        self._pr_new_pin.clear()
-        self._pr_confirm.clear()
-
-        # Invalidate session – user must re-login
-        auth_service.clear_session()
+        self._run_api(recovery_service.reset_master_pin, (self._recovery_email, new_pin), _on_result)
 
     # ─────────────────────────────────────────────────────────────────────────
     #  COOLDOWN TIMER
