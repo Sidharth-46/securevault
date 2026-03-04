@@ -15,7 +15,7 @@ import requests
 
 from config import API_BASE_URL
 
-_TIMEOUT = 15  # seconds
+_TIMEOUT = 60  # seconds – generous to allow Render cold-start wake-up
 
 
 # ── Generic helper ───────────────────────────────────────────────────────────
@@ -40,7 +40,12 @@ def _post(endpoint: str, payload: dict) -> dict[str, Any]:
             "message": "Cannot reach the authentication server. Is the backend running?",
         }
     except requests.Timeout:
-        return {"success": False, "message": "Request timed out. Try again."}
+        return {
+            "success": False,
+            "message": (
+                "Server is waking up. Please wait a moment and try again."
+            ),
+        }
     except requests.HTTPError as exc:
         try:
             body = exc.response.json()
