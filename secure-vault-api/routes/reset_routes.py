@@ -16,7 +16,7 @@ from services.token_service import generate_reset_token, generate_otp
 from services.email_service import send_reset_email, send_otp_email
 from config import (
     RESET_TOKEN_EXPIRY_MINUTES,
-    WEB_RESET_BASE_URL,
+    RESET_WEB_URL,
     OTP_EXPIRY_MINUTES,
     OTP_MAX_ATTEMPTS,
     RESEND_COOLDOWN_SECONDS,
@@ -99,7 +99,7 @@ def forgot_password(body: ForgotPasswordRequest):
         }
     )
 
-    reset_link = f"{WEB_RESET_BASE_URL}/reset-password?token={token}"
+    reset_link = f"{RESET_WEB_URL}/reset-password?token={token}"
     ok, err = send_reset_email(email, reset_link, RESET_TOKEN_EXPIRY_MINUTES)
     if not ok:
         logger.error("Failed to send reset email to %s: %s", email, err)

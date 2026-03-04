@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routes.auth_routes import router as auth_router
 from routes.reset_routes import router as reset_router
+from config import validate_config
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ app.include_router(reset_router)
 
 @app.on_event("startup")
 def _on_startup() -> None:
+    validate_config()
     logger.info("Secure Vault API started")
     logger.info("Allowed CORS origins: %s", _ALLOWED_ORIGINS)
 

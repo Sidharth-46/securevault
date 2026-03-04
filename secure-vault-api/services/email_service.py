@@ -8,23 +8,23 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from config import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+from config import SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_FROM
 
 
 def _smtp_configured() -> bool:
-    return bool(SMTP_USER and SMTP_PASS)
+    return bool(EMAIL_USER and EMAIL_PASS)
 
 
 def send_email(to: str, subject: str, html_body: str) -> tuple[bool, str]:
     """Send an HTML email via SMTP.  Returns ``(success, error_message)``."""
     if not _smtp_configured():
         return False, (
-            "SMTP not configured. Set VAULT_SMTP_USER and VAULT_SMTP_PASS."
+            "SMTP not configured. Set EMAIL_USER and EMAIL_PASS environment variables."
         )
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = SMTP_FROM
+        msg["From"] = EMAIL_FROM
         msg["To"] = to
         msg.attach(MIMEText(html_body, "html"))
 
@@ -32,8 +32,8 @@ def send_email(to: str, subject: str, html_body: str) -> tuple[bool, str]:
             server.ehlo()
             server.starttls()
             server.ehlo()
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_FROM, to, msg.as_string())
+            server.login(EMAIL_USER, EMAIL_PASS)
+            server.sendmail(EMAIL_FROM, to, msg.as_string())
 
         return True, ""
     except Exception as exc:
