@@ -4,11 +4,17 @@ services/email_service.py - Email sending for password resets and OTPs.
 
 from __future__ import annotations
 
+import logging
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from config import SMTP_HOST, SMTP_PORT, EMAIL_USER, EMAIL_PASS, EMAIL_FROM
+
+logger = logging.getLogger("securevault.email")
+
+_TIMEOUT = 30  # seconds – generous to survive cloud cold-starts
 
 
 def _smtp_configured() -> bool:
@@ -16,28 +22,54 @@ def _smtp_configured() -> bool:
 
 
 def send_email(to: str, subject: str, html_body: str) -> tuple[bool, str]:
-    """Send an HTML email via SMTP.  Returns ``(success, error_message)``."""
+    """Send an HTML email via Gmail SMTP.  Returns ``(success, error_message)``."""
     if not _smtp_configured():
         return False, (
             "SMTP not configured. Set EMAIL_USER and EMAIL_PASS environment variables."
         )
-    try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_FROM
-        msg["To"] = to
-        msg.attach(MIMEText(html_body, "html"))
 
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_FROM
+    msg["To"] = to
+    msg.attach(MIMEText(html_body, "html"))
+
+    # Try STARTTLS (port 587) first, then fall back to SSL (port 465)
+    errors: list[str] = []
+
+    # ── Attempt 1: STARTTLS ──────────────────────────────────────────────
+    if SMTP_PORT == 587 or SMTP_PORT != 465:
+        try:
+            logger.info("SMTP STARTTLS attempt → %s:%s  to=%s", SMTP_HOST, 587, to)
+            ctx = ssl.create_default_context()
+            with smtplib.SMTP(SMTP_HOST, 587, timeout=_TIMEOUT) as server:
+                server.ehlo()
+                server.starttls(context=ctx)
+                server.ehlo()
+                server.login(EMAIL_USER, EMAIL_PASS)
+                server.sendmail(EMAIL_FROM, to, msg.as_string())
+            logger.info("Email sent (STARTTLS) to %s", to)
+            return True, ""
+        except Exception as exc:
+            errors.append(f"STARTTLS:{exc}")
+            logger.warning("STARTTLS failed: %s", exc)
+
+    # ── Attempt 2: SSL ───────────────────────────────────────────────────
+    try:
+        logger.info("SMTP SSL attempt → %s:%s  to=%s", SMTP_HOST, 465, to)
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(SMTP_HOST, 465, timeout=_TIMEOUT, context=ctx) as server:
             server.login(EMAIL_USER, EMAIL_PASS)
             server.sendmail(EMAIL_FROM, to, msg.as_string())
-
+        logger.info("Email sent (SSL) to %s", to)
         return True, ""
     except Exception as exc:
-        return False, str(exc)
+        errors.append(f"SSL:{exc}")
+        logger.warning("SSL failed: %s", exc)
+
+    combined = " | ".join(errors)
+    logger.error("All SMTP attempts failed for %s: %s", to, combined)
+    return False, f"Failed to send email: {combined}"
 
 
 # ── Pre-built emails ────────────────────────────────────────────────────────
