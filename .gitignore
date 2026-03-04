@@ -1,0 +1,39 @@
+# ── Sensitive credentials ────────────────────────────────────────────────────
+firebase_service_account.json
+client_secret.json
+.env
+.env.local
+.env.production
+
+# ── Local database and vault data ───────────────────────────────────────────
+vault.db
+vault_files/
+
+# ── Python cache and compiled files ─────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Virtual environments ────────────────────────────────────────────────────
+venv/
+.env/
+.venv/
+
+# ── System files ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Build and packaging artifacts ───────────────────────────────────────────
+dist/
+build/
+*.egg-info
+
+# ── Node / web project ─────────────────────────────────────────────────────
+node_modules/
+.next/
+.vercel/
+
+# ── Logs and temporary files ───────────────────────────────────────────────
+*.log
+*.tmp
