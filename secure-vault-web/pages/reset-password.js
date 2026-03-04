@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 
 // Point this at your deployed backend URL
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_URL || "https://securevault-ubnm.onrender.com";
 
 export default function ResetPasswordPage() {
   const router = useRouter();

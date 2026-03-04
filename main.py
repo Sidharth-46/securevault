@@ -88,6 +88,10 @@ class MainWindow(QMainWindow):
 
 
 def main() -> None:
+    # Print the backend URL on startup for debugging
+    from config import API_BASE_URL
+    print(f"[SecureVault] Backend API URL: {API_BASE_URL}")
+
     # Initialise the database (creates tables on first run)
     database.initialize_database()
 

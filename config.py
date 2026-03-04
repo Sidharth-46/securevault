@@ -11,7 +11,7 @@ import os
 # ── Backend API ──────────────────────────────────────────────────────────────
 # Override with the VAULT_API_URL environment variable when deploying.
 
-API_BASE_URL: str = os.environ.get("VAULT_API_URL", "http://localhost:8000")
+API_BASE_URL: str = os.environ.get("VAULT_API_URL", "https://securevault-ubnm.onrender.com")
 
 # ── Google OAuth ─────────────────────────────────────────────────────────────
 
